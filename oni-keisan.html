@@ -1,0 +1,2079 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>鬼計算 — Nバック計算ゲーム</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+JP:wght@300;400;500;700&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
+<style>
+/* ===== RESET & ROOT ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:       #0a0a0f;
+  --bg-card:  #13131a;
+  --accent:   #6c63ff;
+  --accent-2: #a78bfa;
+  --success:  #10b981;
+  --danger:   #ef4444;
+  --warn:     #f59e0b;
+  --text:     #f1f0ff;
+  --text-2:   #8b85b0;
+  --border:   #1e1e2e;
+  --border-2: #2a2a40;
+  --r:        16px;
+}
+html, body { height: 100%; }
+body {
+  font-family: 'Noto Sans JP', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100dvh;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* ===== BACKGROUND ===== */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 20% 50%, #0f0a1e 0%, #0a0a0f 60%);
+}
+
+/* keep canvas element in DOM but hide it — JS still references it */
+#bg-canvas { display: none; }
+
+/* ===== APP WRAPPER ===== */
+#app {
+  position: relative; z-index: 1;
+  min-height: 100dvh;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 0 20px 32px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/* ===== SCREENS ===== */
+.screen { display: none; width: 100%; flex-direction: column; align-items: center; }
+.screen.active { display: flex; animation: fadeIn .3s ease; }
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ===== START SCREEN ===== */
+#screen-start {
+  justify-content: flex-start;
+  padding-top: max(60px, 12vh);
+  gap: 0;
+}
+
+/* ===== LOGO ===== */
+.logo {
+  text-align: center;
+  margin-bottom: 52px;
+}
+.logo-title {
+  font-family: 'Noto Serif JP', serif;
+  font-size: clamp(2.6rem, 10vw, 3.4rem);
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: .04em;
+  line-height: 1;
+}
+.logo-sub {
+  font-family: 'DM Mono', monospace;
+  font-size: .65rem;
+  color: var(--text-2);
+  letter-spacing: .28em;
+  margin-top: 10px;
+  text-transform: uppercase;
+}
+
+/* ===== N-BACK SELECTOR (pill tabs) ===== */
+.n-selector-label {
+  font-size: .7rem;
+  letter-spacing: .2em;
+  color: var(--text-2);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  width: 100%;
+  text-align: center;
+}
+.n-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+.n-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border-radius: 14px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: background .18s, border-color .18s, transform .1s;
+  -webkit-user-select: none; user-select: none;
+  position: relative;
+}
+.n-btn .medal {
+  position: absolute;
+  top: 4px; right: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: .6rem;
+  font-weight: 500;
+  line-height: 1;
+}
+.n-btn .n-num {
+  font-family: 'DM Mono', monospace;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-2);
+  line-height: 1;
+  transition: color .18s;
+}
+.n-btn .n-label {
+  font-size: .55rem;
+  color: var(--text-2);
+  margin-top: 3px;
+  opacity: .7;
+  transition: color .18s, opacity .18s;
+}
+.n-btn.selected {
+  border-color: var(--accent);
+  background: rgba(108, 99, 255, .18);
+}
+.n-btn.selected .n-num { color: var(--accent-2); }
+.n-btn.selected .n-label { color: var(--accent-2); opacity: 1; }
+.n-btn:active { transform: scale(.93); }
+
+/* 説明テキスト */
+.desc-box {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  padding: 20px 4px 0;
+  font-size: .78rem;
+  line-height: 2;
+  color: var(--text-2);
+  margin-top: 20px;
+  width: 100%;
+  letter-spacing: .02em;
+}
+.desc-box .rule-row {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.desc-box .rule-row:last-child { border-bottom: none; }
+.desc-box .rule-num {
+  font-family: 'DM Mono', monospace;
+  font-size: .65rem; color: var(--accent);
+  flex-shrink: 0; width: 16px; text-align: center;
+}
+.desc-box .rule-text { color: var(--text-2); }
+.desc-box strong { color: var(--text); font-weight: 600; }
+
+/* ルール・設定ボタン共通 */
+.btn-rule, .btn-settings {
+  width: 100%; padding: 14px;
+  border-radius: 12px; border: 1px solid var(--border-2);
+  background: transparent;
+  color: var(--text-2); font-size: .82rem;
+  font-family: 'Noto Sans JP', sans-serif;
+  letter-spacing: .08em; cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.btn-rule { margin-top: 20px; }
+.btn-settings { margin-top: 10px; }
+.btn-rule:active, .btn-settings:active { color: var(--text); border-color: var(--accent); }
+
+/* 設定モーダル内 */
+.settings-section { margin-top: 20px; }
+.settings-section-title {
+  font-size: .65rem; letter-spacing: .16em; color: var(--text-2);
+  text-transform: uppercase; margin-bottom: 10px; opacity: .7;
+}
+.settings-row-label {
+  font-size: .72rem; color: var(--text-2); margin-bottom: 6px; margin-top: 14px;
+}
+.seg-ctrl { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg-btn {
+  flex: 1; min-width: 0; padding: 10px 4px;
+  border-radius: 10px; border: 1px solid var(--border-2);
+  background: var(--bg-card);
+  color: var(--text-2); font-size: .8rem;
+  font-family: 'Noto Sans JP', sans-serif;
+  cursor: pointer; text-align: center;
+  transition: all .15s; white-space: nowrap;
+  -webkit-user-select: none; user-select: none;
+}
+.seg-btn.active {
+  background: rgba(108,99,255,.2);
+  border-color: var(--accent); color: var(--accent-2); font-weight: 600;
+}
+.seg-btn:active { transform: scale(.95); }
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between; padding: 6px 0;
+}
+.toggle-label { font-size: .85rem; color: var(--text); }
+.toggle-label small { display: block; font-size: .7rem; color: var(--text-2); margin-top: 2px; }
+.toggle { position: relative; width: 44px; height: 26px; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.toggle-track {
+  position: absolute; inset: 0; border-radius: 99px;
+  background: var(--border-2); cursor: pointer; transition: background .2s;
+}
+.toggle input:checked + .toggle-track { background: var(--accent); }
+.toggle-track::after {
+  content: ''; position: absolute; left: 3px; top: 3px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; transition: transform .2s;
+}
+.toggle input:checked + .toggle-track::after { transform: translateX(18px); }
+.danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+.btn-danger {
+  width: 100%; padding: 12px;
+  border-radius: 10px; border: 1px solid rgba(239,68,68,.3);
+  background: rgba(239,68,68,.06); color: var(--danger);
+  font-size: .82rem; font-family: 'Noto Sans JP', sans-serif;
+  cursor: pointer; letter-spacing: .06em; transition: background .15s;
+}
+.btn-danger:active { background: rgba(239,68,68,.15); }
+
+/* モーダル */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,.6);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: flex-end;
+  opacity: 0; pointer-events: none;
+  transition: opacity .25s;
+}
+.modal-backdrop.open {
+  opacity: 1; pointer-events: all;
+}
+.modal-sheet {
+  width: 100%; max-width: 480px; margin: 0 auto;
+  background: #16161f;
+  border-top: 1px solid var(--border-2);
+  border-radius: 20px 20px 0 0;
+  padding: 20px 24px 40px;
+  transform: translateY(100%);
+  transition: transform .3s cubic-bezier(.32,1,.42,1);
+}
+.modal-backdrop.open .modal-sheet {
+  transform: translateY(0);
+}
+.modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 4px;
+}
+.modal-title {
+  font-size: .72rem; letter-spacing: .18em; color: var(--text-2);
+  text-transform: uppercase;
+}
+.modal-close {
+  background: none; border: none;
+  color: var(--text-2); font-size: 1rem;
+  cursor: pointer; padding: 4px 8px;
+  transition: color .15s;
+}
+.modal-close:active { color: var(--text); }
+.modal-sheet .desc-box {
+  margin-top: 12px; border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+/* ランキングボタン */
+.btn-ranking {
+  width: 100%; margin-top: 12px; padding: 14px;
+  border-radius: 12px; border: 1px solid var(--border-2);
+  background: transparent;
+  color: var(--text-2); font-size: .82rem;
+  font-family: 'Noto Sans JP', sans-serif;
+  letter-spacing: .08em; cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.btn-ranking:active { color: var(--text); border-color: var(--accent); }
+
+/* ランキングモーダル内 */
+.ranking-list {
+  margin-top: 16px; display: flex; flex-direction: column; gap: 0;
+}
+.ranking-row {
+  display: flex; align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.ranking-row:last-child { border-bottom: none; }
+.rk-medal { font-size: 1.4rem; width: 28px; text-align: center; flex-shrink: 0; }
+.rk-n {
+  font-family: 'DM Mono', monospace; font-size: 1rem; font-weight: 500;
+  color: var(--text); flex: 1;
+}
+.rk-pct {
+  font-family: 'DM Mono', monospace; font-size: 1rem; font-weight: 500;
+  color: var(--text-2);
+  display: flex; align-items: baseline; gap: 6px;
+}
+.rk-pct-label {
+  font-family: 'Noto Sans JP', sans-serif;
+  font-size: .65rem; color: var(--text-2); opacity: .7;
+  letter-spacing: .06em;
+}
+.rk-pct.gold   { color: #fbbf24; }
+.rk-pct.silver { color: #94a3b8; }
+.rk-pct.bronze { color: #c07a3a; }
+.ranking-empty {
+  text-align: center; color: var(--text-2);
+  font-size: .82rem; padding: 24px 0; line-height: 2;
+}
+.medal-legend {
+  display: flex; gap: 16px; justify-content: center;
+  margin-top: 16px; padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: .72rem; color: var(--text-2);
+}
+.medal-legend span { display: flex; align-items: center; gap: 5px; }
+
+/* 結果画面ベスト表示 */
+.best-row {
+  width: 100%;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: .78rem;
+}
+.best-row .best-label { color: var(--text-2); letter-spacing: .08em; }
+.best-row .best-value {
+  font-family: 'DM Mono', monospace; font-size: 1.1rem; font-weight: 500;
+}
+.best-row .best-value.is-new {
+  color: var(--success);
+}
+.best-row .best-value.not-new { color: var(--text-2); }
+.best-new-badge {
+  font-size: .65rem; background: var(--success);
+  color: #fff; border-radius: 4px; padding: 2px 6px;
+  margin-left: 8px; letter-spacing: .06em;
+}
+
+/* スタートボタン */
+.btn-start {
+  width: 100%;
+  margin-top: 24px;
+  padding: 18px;
+  border-radius: 14px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1rem;
+  font-family: 'Noto Sans JP', sans-serif;
+  cursor: pointer;
+  letter-spacing: .08em;
+  transition: transform .15s, box-shadow .15s, background .15s;
+  box-shadow: 0 4px 24px rgba(108, 99, 255, .35);
+}
+.btn-start:active {
+  transform: scale(.97);
+  background: #5a52d5;
+  box-shadow: 0 2px 12px rgba(108, 99, 255, .2);
+}
+
+/* ===== PLAY SCREEN ===== */
+#screen-play {
+  padding-top: 0;
+  gap: 0;
+}
+
+/* ===== HUD ===== */
+.hud {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 52px;
+  background: rgba(10, 10, 15, 0.92);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/* position HUD relative to app container */
+#screen-play .hud {
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+}
+
+.hud-back {
+  font-size: .8rem;
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 6px 2px;
+  letter-spacing: .02em;
+  -webkit-user-select: none; user-select: none;
+}
+.hud-back:active { opacity: .6; }
+
+.hud-level {
+  font-family: 'DM Mono', monospace;
+  font-size: .85rem;
+  font-weight: 700;
+  color: var(--accent-2);
+  letter-spacing: .06em;
+}
+
+.hud-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hud-score-text {
+  font-size: .78rem;
+  color: var(--text-2);
+  letter-spacing: .04em;
+}
+.hud-score-text span {
+  font-family: 'DM Mono', monospace;
+  font-size: .9rem;
+  color: var(--text);
+}
+
+.hud-mute {
+  background: transparent;
+  border: none;
+  font-size: 1rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px;
+  transition: opacity .15s, transform .12s;
+  -webkit-user-select: none; user-select: none;
+  color: var(--text-2);
+}
+.hud-mute:active { transform: scale(.88); }
+.hud-mute.muted { opacity: .35; }
+
+/* ===== PROGRESS BAR ===== */
+.progress-wrap {
+  position: fixed;
+  top: 52px;
+  left: 0; right: 0;
+  z-index: 49;
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  max-width: 480px;
+  margin: 0 auto;
+}
+.progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width linear, background .5s;
+  width: 100%;
+}
+.progress-bar.warning { background: var(--warn); }
+.progress-bar.danger  { background: var(--danger); }
+
+/* play screen inner spacing to clear fixed HUD */
+.play-inner {
+  width: 100%;
+  padding-top: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+/* ===== DOTS ===== */
+.dots-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  width: 100%;
+  margin-bottom: 20px;
+  padding: 0 4px;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border-2);
+  transition: background .2s, width .2s, border-radius .2s;
+}
+.dot.answered-correct { background: var(--success); }
+.dot.answered-wrong   { background: var(--danger); }
+.dot.current {
+  background: var(--accent);
+  width: 22px;
+  border-radius: 5px;
+}
+.dot.skip { background: var(--warn); opacity: .4; }
+
+/* ===== COLLECTING BANNER (hidden — phase label handles it) ===== */
+.collecting-banner { display: none !important; }
+
+/* ===== QUESTION AREA ===== */
+.question-area {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 24px 28px;
+  text-align: center;
+  position: relative;
+  min-height: 180px;
+  margin-bottom: 16px;
+}
+.q-phase-label {
+  font-size: .72rem;
+  letter-spacing: .18em;
+  color: var(--text-2);
+  margin-bottom: 14px;
+  text-transform: uppercase;
+}
+.q-phase-label.collecting-phase {
+  color: var(--warn);
+}
+.q-divider {
+  width: 32px;
+  height: 1px;
+  background: var(--border-2);
+  margin: 0 auto 20px;
+}
+.q-expression {
+  font-family: 'DM Mono', monospace;
+  font-size: clamp(3rem, 15vw, 4.5rem);
+  font-weight: 900;
+  color: var(--text);
+  letter-spacing: .04em;
+  line-height: 1;
+  transition: opacity .18s, transform .18s;
+}
+.q-expression.fade {
+  opacity: 0;
+  transform: scale(.96);
+}
+.q-expression.collecting-expr {
+  color: var(--text-2);
+  font-size: clamp(2rem, 10vw, 3rem);
+}
+.q-index {
+  font-size: .68rem;
+  color: var(--text-2);
+  margin-top: 18px;
+  letter-spacing: .12em;
+  font-family: 'DM Mono', monospace;
+}
+
+/* ===== FEEDBACK — edge glow instead of overlay ===== */
+.feedback-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .08s;
+}
+.feedback-overlay.show { opacity: 1; }
+.feedback-overlay.correct {
+  box-shadow: 0 0 0 2px var(--success), inset 0 0 40px rgba(16,185,129,.08);
+}
+.feedback-overlay.wrong {
+  box-shadow: 0 0 0 2px var(--danger), inset 0 0 40px rgba(239,68,68,.08);
+}
+
+/* wrong answer: show correct answer hint */
+.q-correct-hint {
+  position: absolute;
+  bottom: 10px;
+  left: 0; right: 0;
+  text-align: center;
+  font-size: .75rem;
+  color: var(--danger);
+  opacity: 0;
+  transition: opacity .1s;
+  letter-spacing: .06em;
+}
+.q-correct-hint.show { opacity: 1; }
+
+/* skip area — hidden, info shown via phase label */
+.skip-area { display: none !important; }
+
+/* ===== ANSWER DISPLAY ===== */
+.answer-display {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin-bottom: 12px;
+  min-height: 64px;
+}
+.answer-display .ad-label {
+  font-size: .73rem;
+  color: var(--text-2);
+  line-height: 1.4;
+  max-width: 55%;
+}
+.answer-display .ad-hint {
+  font-size: .65rem;
+  color: var(--text-2);
+  opacity: .6;
+  margin-top: 2px;
+}
+.answer-display .ad-value {
+  font-family: 'DM Mono', monospace;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--border-2);
+  letter-spacing: .06em;
+  min-width: 60px;
+  text-align: right;
+  transition: color .12s;
+}
+.answer-display .ad-value.has-value {
+  color: var(--accent-2);
+}
+
+/* ===== NUMPAD ===== */
+.numpad {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.np-btn {
+  padding: 0;
+  height: 68px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 1.4rem;
+  font-weight: 500;
+  font-family: 'Noto Sans JP', sans-serif;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .1s, transform .1s;
+  -webkit-user-select: none; user-select: none;
+}
+.np-btn:active {
+  transform: scale(.93);
+  background: var(--border);
+}
+.np-btn.digit {
+  font-family: 'DM Mono', monospace;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text);
+}
+/* layout: PASS full-width top, DEL bottom-left, 0 bottom-center, ENTER bottom-right */
+.np-btn.pass {
+  grid-column: 1 / -1;
+  height: 48px;
+  font-size: .82rem; letter-spacing: .12em;
+  color: var(--text-2);
+  border-color: var(--border-2);
+  font-family: 'Noto Sans JP', sans-serif;
+}
+.np-btn.pass:active { background: var(--border); color: var(--text); }
+.np-btn.zero  { grid-column: 2; }
+.np-btn.del   {
+  grid-column: 1;
+  background: rgba(239, 68, 68, .07);
+  border-color: rgba(239, 68, 68, .18);
+  color: var(--danger);
+  font-size: 1.2rem;
+}
+.np-btn.del:active { background: rgba(239, 68, 68, .15); }
+.np-btn.enter {
+  grid-column: 3;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-size: 1.5rem;
+  box-shadow: 0 2px 12px rgba(108, 99, 255, .3);
+}
+.np-btn.enter:active {
+  background: #5a52d5;
+  transform: scale(.93);
+}
+.np-btn:disabled { opacity: .25; pointer-events: none; }
+
+/* ===== RESULT SCREEN ===== */
+#screen-result {
+  padding-top: 48px;
+  gap: 0;
+}
+
+.result-pct-wrap {
+  text-align: center;
+  margin-bottom: 32px;
+  width: 100%;
+}
+.result-pct-number {
+  font-family: 'DM Mono', monospace;
+  font-size: clamp(4rem, 18vw, 5.5rem);
+  font-weight: 900;
+  color: var(--text);
+  line-height: 1;
+  letter-spacing: -.02em;
+}
+.result-pct-number.pct-up   { color: var(--success); }
+.result-pct-number.pct-warn { color: var(--warn); }
+.result-pct-number.pct-down { color: var(--danger); }
+.result-pct-label {
+  font-size: .72rem;
+  color: var(--text-2);
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  margin-top: 8px;
+}
+.result-level-line {
+  font-size: .8rem;
+  color: var(--text-2);
+  letter-spacing: .12em;
+  margin-top: 6px;
+}
+
+/* スタッツグリッド */
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 14px;
+}
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+.stat-value {
+  font-family: 'DM Mono', monospace;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.stat-label {
+  font-size: .68rem;
+  color: var(--text-2);
+  margin-top: 5px;
+  letter-spacing: .1em;
+}
+
+/* ring SVG — keep in DOM, hidden */
+.score-ring-wrap { display: none; }
+
+/* レベル判定バナー */
+.level-banner {
+  width: 100%;
+  border-radius: 12px;
+  padding: 16px 18px;
+  text-align: center;
+  font-size: .88rem;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.level-banner.up   {
+  background: rgba(16, 185, 129, .08);
+  border: 1px solid rgba(16, 185, 129, .22);
+}
+.level-banner.down {
+  background: rgba(239, 68, 68, .08);
+  border: 1px solid rgba(239, 68, 68, .22);
+}
+.level-banner.same {
+  background: rgba(245, 158, 11, .07);
+  border: 1px solid rgba(245, 158, 11, .2);
+}
+.level-banner .banner-icon {
+  font-size: 1.4rem;
+  display: block;
+  margin-bottom: 6px;
+}
+.level-banner .banner-title {
+  font-weight: 700;
+  font-size: .95rem;
+  letter-spacing: .04em;
+}
+.level-banner.up   .banner-title { color: var(--success); }
+.level-banner.down .banner-title { color: var(--danger); }
+.level-banner.same .banner-title { color: var(--warn); }
+
+/* 結果ボタン群 */
+.result-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+.btn-action {
+  width: 100%;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: .95rem;
+  font-weight: 600;
+  font-family: 'Noto Sans JP', sans-serif;
+  cursor: pointer;
+  letter-spacing: .04em;
+  transition: background .15s, transform .12s;
+}
+.btn-action:active { transform: scale(.97); }
+.btn-action.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 4px 20px rgba(108, 99, 255, .3);
+}
+.btn-action.primary:active { background: #5a52d5; }
+.btn-action.secondary {
+  border-color: var(--border-2);
+  color: var(--text-2);
+  background: transparent;
+}
+.btn-action.ghost { opacity: .5; background: transparent; border-color: transparent; }
+
+/* ===== COUNTDOWN OVERLAY ===== */
+#countdown-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(10, 10, 15, .94);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  display: none;
+}
+#countdown-overlay.show { display: flex; animation: fadeIn .2s ease; }
+.cd-num {
+  font-family: 'DM Mono', monospace;
+  font-size: 5.5rem; font-weight: 900;
+  color: var(--text);
+  animation: cdPop .8s ease;
+}
+.cd-label {
+  font-size: .85rem;
+  color: var(--text-2);
+  margin-top: 16px;
+  letter-spacing: .2em;
+}
+@keyframes cdPop {
+  0%   { transform: scale(1.5); opacity: 0; }
+  35%  { transform: scale(1);   opacity: 1; }
+  75%  { transform: scale(1);   opacity: 1; }
+  100% { transform: scale(.85); opacity: 0; }
+}
+
+/* ===== ANIMATIONS ===== */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-6px); }
+  40%       { transform: translateX(6px); }
+  60%       { transform: translateX(-6px); }
+  80%       { transform: translateX(6px); }
+}
+.shake { animation: shake 200ms ease; }
+
+@keyframes pulse-correct {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.04); }
+}
+.pulse-correct { animation: pulse-correct 250ms ease; }
+</style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<div id="app">
+
+  <!-- ===== START SCREEN ===== -->
+  <div id="screen-start" class="screen active">
+    <div class="logo">
+      <div class="logo-title">鬼計算</div>
+      <div class="logo-sub">N-BACK CALCULATION</div>
+    </div>
+
+    <div class="n-selector-label">Nバックレベルを選択</div>
+    <div class="n-grid" id="n-grid">
+      <!-- JS生成 -->
+    </div>
+
+    <button class="btn-start" id="btn-start">ゲームスタート</button>
+    <button class="btn-rule" id="btn-rule">ルールを確認する ↗</button>
+    <button class="btn-settings" id="btn-settings">⚙️ 設定 ↗</button>
+  </div>
+
+  <!-- ===== SETTINGS MODAL ===== -->
+  <div id="settings-modal" class="modal-backdrop">
+    <div class="modal-sheet" style="max-height:88dvh;overflow-y:auto;">
+      <div class="modal-header">
+        <span class="modal-title">設定</span>
+        <button class="modal-close" id="btn-settings-close">✕</button>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">⏱ タイマー</div>
+        <div class="settings-row-label" style="margin-top:8px;">回答時間</div>
+        <div class="seg-ctrl" id="seg-answer-time">
+          <button class="seg-btn" data-val="4">4秒</button>
+          <button class="seg-btn" data-val="6">6秒</button>
+          <button class="seg-btn" data-val="8">8秒</button>
+          <button class="seg-btn" data-val="10">10秒</button>
+          <button class="seg-btn" data-val="12">12秒</button>
+        </div>
+        <div class="settings-row-label">暗記時間</div>
+        <div class="seg-ctrl" id="seg-mem-time">
+          <button class="seg-btn" data-val="1">1秒</button>
+          <button class="seg-btn" data-val="2">2秒</button>
+          <button class="seg-btn" data-val="3">3秒</button>
+          <button class="seg-btn" data-val="4">4秒</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">📋 問題</div>
+        <div class="settings-row-label" style="margin-top:8px;">問題数</div>
+        <div class="seg-ctrl" id="seg-total-q">
+          <button class="seg-btn" data-val="10">10問</button>
+          <button class="seg-btn" data-val="15">15問</button>
+          <button class="seg-btn" data-val="20">20問</button>
+          <button class="seg-btn" data-val="30">30問</button>
+        </div>
+        <div class="settings-row-label">演算子</div>
+        <div class="seg-ctrl" id="seg-operators">
+          <button class="seg-btn" data-val="both">＋ と −</button>
+          <button class="seg-btn" data-val="add">＋ のみ</button>
+          <button class="seg-btn" data-val="sub">− のみ</button>
+        </div>
+        <div class="settings-row-label">数字の難易度</div>
+        <div class="seg-ctrl" id="seg-operand">
+          <button class="seg-btn" data-val="5">1〜5</button>
+          <button class="seg-btn" data-val="9">1〜9</button>
+          <button class="seg-btn" data-val="19">10〜19</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">🎮 ゲームプレイ</div>
+        <div class="toggle-row" style="margin-top:8px;">
+          <div class="toggle-label">カウントダウン<small>ゲーム開始前の3・2・1</small></div>
+          <label class="toggle"><input type="checkbox" id="tog-countdown"><div class="toggle-track"></div></label>
+        </div>
+        <div class="toggle-row">
+          <div class="toggle-label">正誤フィードバック<small>回答後に○/×を表示</small></div>
+          <label class="toggle"><input type="checkbox" id="tog-feedback"><div class="toggle-track"></div></label>
+        </div>
+        <div class="toggle-row">
+          <div class="toggle-label">不正解時に正解表示<small>タイムアウト・誤答時の正解値</small></div>
+          <label class="toggle"><input type="checkbox" id="tog-show-answer"><div class="toggle-track"></div></label>
+        </div>
+      </div>
+
+      <div class="danger-zone">
+        <button class="btn-danger" id="btn-reset-scores">ベストスコアをリセット</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== RANKING MODAL ===== -->
+  <div id="ranking-modal" class="modal-backdrop">
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <span class="modal-title">ランキング</span>
+        <button class="modal-close" id="btn-ranking-close">✕</button>
+      </div>
+      <div id="ranking-content"></div>
+    </div>
+  </div>
+
+  <!-- ===== RULE MODAL ===== -->
+  <div id="rule-modal" class="modal-backdrop">
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <span class="modal-title">ルール</span>
+        <button class="modal-close" id="btn-rule-close">✕</button>
+      </div>
+      <div id="rule-desc" class="desc-box"></div>
+    </div>
+  </div>
+
+  <!-- ===== PLAY SCREEN ===== -->
+  <div id="screen-play" class="screen">
+    <!-- HUD (fixed top bar) -->
+    <div class="hud">
+      <span class="hud-back" onclick="clearTimer(); inputLocked=true; initStartScreen(); renderStartBests(); showScreen('screen-start');">終了</span>
+      <div class="hud-level"><span id="hud-n">1</span>バック</div>
+      <div class="hud-right">
+        <span class="hud-score-text">正解 <span id="hud-score">0</span>/<span id="hud-total">0</span></span>
+        <button class="hud-mute" id="btn-mute" title="ミュート切替">🔊</button>
+      </div>
+    </div>
+
+    <!-- プログレスバー (fixed just below HUD) -->
+    <div class="progress-wrap">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
+
+    <!-- inner content (clears fixed HUD) -->
+    <div class="play-inner">
+
+      <!-- ドットインジケーター -->
+      <div class="dots-row" id="dots-row"></div>
+
+      <!-- Collecting フェーズバナー (hidden via CSS, kept for JS) -->
+      <div class="collecting-banner" id="collecting-banner">
+        📥 全問表示終了！残りの答えを入力してください
+      </div>
+
+      <!-- 問題エリア -->
+      <div class="question-area" id="question-area">
+        <div class="feedback-overlay" id="feedback-overlay"></div>
+        <div class="q-phase-label" id="q-phase-label"></div>
+        <div class="q-divider"></div>
+        <div class="q-expression" id="q-expression"></div>
+        <div class="q-index" id="q-index"></div>
+        <div class="q-correct-hint" id="q-correct-hint"></div>
+      </div>
+
+      <!-- スキップ通知 (hidden via CSS) -->
+      <div class="skip-area" id="skip-area"></div>
+
+      <!-- 回答表示 -->
+      <div class="answer-display" id="answer-display">
+        <div>
+          <div class="ad-label" id="ad-label">回答を入力</div>
+          <div class="ad-hint" id="ad-hint"></div>
+        </div>
+        <div class="ad-value" id="ad-value">__</div>
+      </div>
+
+      <!-- テンキー -->
+      <div class="numpad" id="numpad">
+        <button class="np-btn pass" id="btn-pass">スキップ</button>
+        <button class="np-btn digit" data-val="7">7</button>
+        <button class="np-btn digit" data-val="8">8</button>
+        <button class="np-btn digit" data-val="9">9</button>
+        <button class="np-btn digit" data-val="4">4</button>
+        <button class="np-btn digit" data-val="5">5</button>
+        <button class="np-btn digit" data-val="6">6</button>
+        <button class="np-btn digit" data-val="1">1</button>
+        <button class="np-btn digit" data-val="2">2</button>
+        <button class="np-btn digit" data-val="3">3</button>
+        <button class="np-btn del" id="btn-del">⌫</button>
+        <button class="np-btn zero digit" data-val="0">0</button>
+        <button class="np-btn enter" id="btn-enter">✓</button>
+      </div>
+
+    </div><!-- /play-inner -->
+  </div>
+
+  <!-- ===== RESULT SCREEN ===== -->
+  <div id="screen-result" class="screen">
+
+    <!-- 正答率 (big number, no ring) -->
+    <div class="result-pct-wrap">
+      <div class="result-pct-number" id="ring-pct">0%</div>
+      <div class="result-pct-label">正答率</div>
+      <div class="result-level-line" id="result-level"></div>
+    </div>
+
+    <!-- ring SVG — kept in DOM for JS references, visually hidden -->
+    <div class="score-ring-wrap">
+      <div class="score-ring">
+        <svg width="140" height="140" viewBox="0 0 140 140">
+          <circle class="ring-bg" cx="70" cy="70" r="54" fill="none" stroke-width="10"/>
+          <circle class="ring-fill" id="ring-fill" cx="70" cy="70" r="54" fill="none" stroke-width="10"/>
+        </svg>
+        <div class="ring-label">
+          <div class="ring-pct" id="_ring-pct-unused">0%</div>
+          <div class="ring-sub">正答率</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- スタッツ -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-correct">0</div>
+        <div class="stat-label">正解数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-total">0</div>
+        <div class="stat-label">総回答数</div>
+      </div>
+    </div>
+
+    <!-- 自己ベスト -->
+    <div class="best-row" id="best-row"></div>
+
+    <!-- レベル判定バナー -->
+    <div class="level-banner" id="level-banner">
+      <span class="banner-icon" id="banner-icon"></span>
+      <div class="banner-title" id="banner-title"></div>
+      <div id="banner-desc" style="font-size:.8rem;margin-top:6px;color:var(--text-2);"></div>
+    </div>
+
+    <!-- アクションボタン -->
+    <div class="result-actions" id="result-actions"></div>
+
+  </div>
+
+</div><!-- /app -->
+
+<!-- カウントダウンオーバーレイ -->
+<div id="countdown-overlay">
+  <div class="cd-num" id="cd-num">3</div>
+  <div class="cd-label">準備してください</div>
+</div>
+
+<script>
+/* ===========================
+   SOUND ENGINE (Web Audio API)
+=========================== */
+const SE = (() => {
+  let ctx = null;
+  let muted = false;
+
+  function getCtx() {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    return ctx;
+  }
+  function resume() {
+    const c = getCtx();
+    if (c.state === 'suspended') c.resume();
+    return c;
+  }
+
+  // 基本オシレーター
+  function tone(freq, type, duration, gain = 0.25, delay = 0, freqEnd = null) {
+    if (muted) return;
+    const c = resume();
+    const osc = c.createOscillator();
+    const g   = c.createGain();
+    osc.connect(g); g.connect(c.destination);
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, c.currentTime + delay);
+    if (freqEnd !== null)
+      osc.frequency.linearRampToValueAtTime(freqEnd, c.currentTime + delay + duration);
+    g.gain.setValueAtTime(0, c.currentTime + delay);
+    g.gain.linearRampToValueAtTime(gain, c.currentTime + delay + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + delay + duration);
+    osc.start(c.currentTime + delay);
+    osc.stop(c.currentTime + delay + duration + 0.01);
+  }
+
+  // ノイズバースト（削除・エラー系）
+  function noise(duration, gain = 0.12, delay = 0) {
+    if (muted) return;
+    const c = resume();
+    const bufSize = c.sampleRate * duration;
+    const buf = c.createBuffer(1, bufSize, c.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+    const src = c.createBufferSource();
+    const g   = c.createGain();
+    src.buffer = buf;
+    src.connect(g); g.connect(c.destination);
+    g.gain.setValueAtTime(gain, c.currentTime + delay);
+    g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + delay + duration);
+    src.start(c.currentTime + delay);
+  }
+
+  return {
+    get muted() { return muted; },
+    toggle() { muted = !muted; return muted; },
+
+    // テンキー押下 — 短いコツッ
+    tap()  { tone(900, 'sine', 0.055, 0.13); },
+
+    // 削除 — 低めの短音
+    del()  { tone(380, 'sine', 0.07, 0.10); },
+
+    // 正解 — 明るい3和音アルペジオ
+    correct() {
+      tone(523, 'sine', 0.14, 0.28);          // C5
+      tone(659, 'sine', 0.14, 0.28, 0.09);    // E5
+      tone(784, 'sine', 0.18, 0.30, 0.18);    // G5
+    },
+
+    // 不正解 — 下降サイン波
+    wrong() {
+      tone(300, 'sawtooth', 0.22, 0.18, 0, 130);
+    },
+
+    // 時間切れ — 2段下降
+    timeout() {
+      tone(220, 'square', 0.18, 0.14);
+      tone(150, 'square', 0.20, 0.12, 0.22);
+    },
+
+    // 残り時間警告チック
+    warning() { tone(1100, 'square', 0.04, 0.07); },
+
+    // カウントダウン 3・2・1
+    countdown() { tone(660, 'sine', 0.14, 0.30); },
+
+    // GO!
+    go() {
+      tone(880,  'sine', 0.09, 0.35);
+      tone(1100, 'sine', 0.22, 0.35, 0.09);
+    },
+
+    // 問題切替 — ソフトなチャイム
+    next() { tone(480, 'sine', 0.09, 0.10); },
+
+    // ゲーム終了ファンファーレ
+    fanfare(isUp) {
+      if (isUp) {
+        [523, 659, 784, 1047].forEach((f, i) => tone(f, 'sine', 0.22, 0.28, i * 0.13));
+      } else {
+        tone(440, 'sine', 0.28, 0.22);
+        tone(392, 'sine', 0.28, 0.18, 0.22);
+        tone(349, 'sine', 0.35, 0.20, 0.44);
+      }
+    },
+  };
+})();
+
+/* ===========================
+   CONFIG
+=========================== */
+const CONFIG = {
+  TOTAL_QUESTIONS:      20,
+  TIME_PER_QUESTION:    8,
+  TIME_MEMORIZE:        2,
+  MIN_OPERAND:          1,
+  MAX_OPERAND:          9,
+  OPERATORS:            'both',
+  LEVEL_UP_THRESHOLD:   0.85,
+  LEVEL_DOWN_THRESHOLD: 0.50,
+  MAX_N_BACK:           99,
+  FEEDBACK_DURATION:    320,
+  COUNTDOWN:            true,
+  FEEDBACK:             true,
+  SHOW_ANSWER:          true,
+};
+
+/* ===========================
+   STATE
+=========================== */
+let gameState = {
+  nBack: 1,
+  questions: [],
+  currentIndex: 0,
+  answers: [],
+  score: 0,
+  totalAnswered: 0,
+  phase: 'waiting',  // waiting | playing | collecting | result
+  collectingOffset: 0,
+};
+
+let timerInterval = null;
+let timerRemaining = 0;
+let inputLocked = false;
+let currentInput = '';
+
+/* ===========================
+   BACKGROUND CANVAS
+=========================== */
+(function initBg() {
+  const canvas = document.getElementById('bg-canvas');
+  const ctx = canvas.getContext('2d');
+  let particles = [];
+  const COUNT = 38;
+
+  function resize() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  for (let i = 0; i < COUNT; i++) {
+    particles.push({
+      x: Math.random() * window.innerWidth,
+      y: Math.random() * window.innerHeight,
+      r: Math.random() * 1.6 + .4,
+      vx: (Math.random() - .5) * .25,
+      vy: (Math.random() - .5) * .25,
+      alpha: Math.random() * .4 + .1,
+    });
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // connections
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < 130) {
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.strokeStyle = `rgba(0,229,255,${.06 * (1 - dist/130)})`;
+          ctx.lineWidth = .7;
+          ctx.stroke();
+        }
+      }
+    }
+    // dots
+    particles.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(0,229,255,${p.alpha})`;
+      ctx.fill();
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0 || p.x > canvas.width)  p.vx *= -1;
+      if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+    });
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* ===========================
+   SETTINGS (localStorage)
+=========================== */
+const SETTINGS_KEY = 'oni_keisan_settings';
+const DEFAULT_SETTINGS = {
+  timePerQuestion: 8, timeMemorize: 2, totalQuestions: 20,
+  operators: 'both', operandMax: 9,
+  countdown: true, feedback: true, showAnswer: true,
+};
+function loadSettings() {
+  try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY)) }; }
+  catch { return { ...DEFAULT_SETTINGS }; }
+}
+function applySettings(s) {
+  CONFIG.TIME_PER_QUESTION = s.timePerQuestion;
+  CONFIG.TIME_MEMORIZE     = s.timeMemorize;
+  CONFIG.TOTAL_QUESTIONS   = s.totalQuestions;
+  CONFIG.OPERATORS         = s.operators;
+  CONFIG.MAX_OPERAND       = s.operandMax === 19 ? 19 : s.operandMax;
+  CONFIG.MIN_OPERAND       = s.operandMax === 19 ? 10 : 1;
+  CONFIG.COUNTDOWN         = s.countdown;
+  CONFIG.FEEDBACK          = s.feedback;
+  CONFIG.SHOW_ANSWER       = s.showAnswer;
+}
+function saveSettings(s) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  applySettings(s);
+}
+function renderSettingsUI() {
+  const s = loadSettings();
+  const setActive = (id, val) =>
+    document.querySelectorAll(`#${id} .seg-btn`).forEach(b =>
+      b.classList.toggle('active', b.dataset.val === String(val)));
+  setActive('seg-answer-time', s.timePerQuestion);
+  setActive('seg-mem-time',    s.timeMemorize);
+  setActive('seg-total-q',     s.totalQuestions);
+  setActive('seg-operators',   s.operators);
+  setActive('seg-operand',     s.operandMax);
+  document.getElementById('tog-countdown').checked   = s.countdown;
+  document.getElementById('tog-feedback').checked    = s.feedback;
+  document.getElementById('tog-show-answer').checked = s.showAnswer;
+}
+function initSettingsEvents() {
+  const collect = () => {
+    const get = id => document.querySelector(`#${id} .seg-btn.active`)?.dataset.val;
+    saveSettings({
+      timePerQuestion: +(get('seg-answer-time') ?? 8),
+      timeMemorize:    +(get('seg-mem-time')    ?? 2),
+      totalQuestions:  +(get('seg-total-q')     ?? 20),
+      operators:         get('seg-operators')   ?? 'both',
+      operandMax:      +(get('seg-operand')      ?? 9),
+      countdown:    document.getElementById('tog-countdown').checked,
+      feedback:     document.getElementById('tog-feedback').checked,
+      showAnswer:   document.getElementById('tog-show-answer').checked,
+    });
+  };
+  ['seg-answer-time','seg-mem-time','seg-total-q','seg-operators','seg-operand'].forEach(id => {
+    document.querySelectorAll(`#${id} .seg-btn`).forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll(`#${id} .seg-btn`).forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        collect();
+      });
+    });
+  });
+  ['tog-countdown','tog-feedback','tog-show-answer'].forEach(id =>
+    document.getElementById(id).addEventListener('change', collect));
+  document.getElementById('btn-reset-scores').addEventListener('click', () => {
+    if (confirm('ベストスコアをすべて削除しますか？')) {
+      localStorage.removeItem(BEST_KEY);
+      initStartScreen(); renderStartBests();
+    }
+  });
+}
+
+/* ===========================
+   BEST SCORES (localStorage)
+=========================== */
+const BEST_KEY = 'oni_keisan_bests';
+
+function loadBests() {
+  try { return JSON.parse(localStorage.getItem(BEST_KEY)) || {}; }
+  catch { return {}; }
+}
+
+function saveBest(nBack, pct) {
+  const bests = loadBests();
+  const prev = bests[nBack] ?? -1;
+  if (pct > prev) { bests[nBack] = pct; localStorage.setItem(BEST_KEY, JSON.stringify(bests)); }
+  return { prev, isNew: pct > prev };
+}
+
+function getMedal(pct) {
+  if (pct === undefined || pct < 0) return null;
+  if (pct >= 85) return { emoji: '⭐⭐⭐', cls: 'gold' };
+  if (pct >= 70) return { emoji: '⭐⭐', cls: 'silver' };
+  if (pct >= 50) return { emoji: '⭐', cls: 'bronze' };
+  return null;
+}
+
+function renderStartBests() {
+  // 勲章をNボタンに反映
+  const bests = loadBests();
+  document.querySelectorAll('.n-btn').forEach(btn => {
+    const n = +btn.dataset.n;
+    const pct = bests[n];
+    const old = btn.querySelector('.medal');
+    if (old) old.remove();
+    if (pct !== undefined) {
+      const medal = getMedal(pct);
+      const sp = document.createElement('span');
+      sp.className = 'medal';
+      sp.textContent = `${pct}%`;
+      sp.style.color = medal ? (medal.cls === 'gold' ? '#fbbf24' : medal.cls === 'silver' ? '#94a3b8' : '#c07a3a') : 'var(--text-2)';
+      btn.appendChild(sp);
+    }
+  });
+}
+
+function renderRanking() {
+  const bests = loadBests();
+  const el = document.getElementById('ranking-content');
+  const entries = Object.entries(bests).sort((a, b) => +a[0] - +b[0]);
+  if (entries.length === 0) {
+    el.innerHTML = `<div class="ranking-empty">まだ記録がありません。<br>ゲームをプレイして記録を作ろう！</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="ranking-list">
+      ${entries.map(([n, pct]) => {
+        const medal = getMedal(pct);
+        return `<div class="ranking-row">
+          <span class="rk-medal">${medal ? medal.emoji : '—'}</span>
+          <span class="rk-n">${n}バック</span>
+          <span class="rk-pct ${medal ? medal.cls : ''}">
+            <span class="rk-pct-label">正解率</span>${pct}%
+          </span>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="medal-legend">
+      <span>⭐⭐⭐ 85%以上</span>
+      <span>⭐⭐ 70〜84%</span>
+      <span>⭐ 50〜69%</span>
+    </div>
+  `;
+}
+
+/* ===========================
+   UTILS
+=========================== */
+function rand(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+/* ===========================
+   START SCREEN SETUP
+=========================== */
+function initStartScreen() {
+  const grid = document.getElementById('n-grid');
+  grid.innerHTML = '';
+  for (let n = 1; n <= 9; n++) {
+    const btn = document.createElement('button');
+    btn.className = 'n-btn' + (n === gameState.nBack ? ' selected' : '');
+    btn.dataset.n = n;
+    btn.innerHTML = `<span class="n-num">${n}</span><span class="n-label">バック</span>`;
+    btn.addEventListener('click', () => {
+      gameState.nBack = n;
+      document.querySelectorAll('.n-btn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      updateRuleDesc();
+    });
+    grid.appendChild(btn);
+  }
+  updateRuleDesc();
+}
+
+function updateRuleDesc() {
+  const n = gameState.nBack;
+  document.getElementById('rule-desc').innerHTML = `
+    <div class="rule-row"><span class="rule-num">01</span><span class="rule-text">計算式が1問ずつ表示される</span></div>
+    <div class="rule-row"><span class="rule-num">02</span><span class="rule-text">最初の <strong>${n}問</strong> は見るだけ — 回答不要</span></div>
+    <div class="rule-row"><span class="rule-num">03</span><span class="rule-text"><strong>${n}問前</strong> の答えを入力して決定</span></div>
+    <div class="rule-row"><span class="rule-num">04</span><span class="rule-text">1問 <strong>${CONFIG.TIME_PER_QUESTION}秒</strong>、全 <strong>${CONFIG.TOTAL_QUESTIONS}問</strong></span></div>
+  `;
+}
+
+/* ===========================
+   QUESTION GENERATION
+=========================== */
+function generateQuestions() {
+  // 暗記N問 + 回答TOTAL_QUESTIONS問 = 合計N+TOTAL問生成
+  const total = CONFIG.TOTAL_QUESTIONS + gameState.nBack;
+  const qs = [];
+  for (let i = 0; i < total; i++) {
+    let a, b, op, answer;
+    do {
+      op = CONFIG.OPERATORS === 'add' ? '+' : CONFIG.OPERATORS === 'sub' ? '-' : (Math.random() < .5 ? '+' : '-');
+      a = rand(CONFIG.MIN_OPERAND, CONFIG.MAX_OPERAND);
+      b = rand(CONFIG.MIN_OPERAND, CONFIG.MAX_OPERAND);
+      answer = op === '+' ? a + b : a - b;
+    } while (answer < 0 || answer > 18);
+    qs.push({ a, op, b, answer });
+  }
+  return qs;
+}
+
+/* ===========================
+   COUNTDOWN THEN START
+=========================== */
+function startWithCountdown() {
+  if (!CONFIG.COUNTDOWN) { startGame(); return; }
+  const overlay = document.getElementById('countdown-overlay');
+  const numEl   = document.getElementById('cd-num');
+  overlay.classList.add('show');
+  let count = 3;
+
+  function tick() {
+    numEl.textContent = count;
+    numEl.style.animation = 'none';
+    void numEl.offsetWidth; // reflow
+    numEl.style.animation = 'cdPop .8s ease';
+    if (count > 0) SE.countdown(); else SE.go();
+    count--;
+    if (count < 0) {
+      overlay.classList.remove('show');
+      startGame();
+    } else {
+      setTimeout(tick, 900);
+    }
+  }
+  tick();
+}
+
+/* ===========================
+   GAME INIT
+=========================== */
+function startGame() {
+  const n = gameState.nBack;
+  gameState = {
+    nBack: n,
+    questions: generateQuestions(),
+    currentIndex: 0,
+    answers: [],
+    score: 0,
+    totalAnswered: 0,
+    phase: 'playing',
+    collectingOffset: 0,
+  };
+  currentInput = '';
+  inputLocked = false;
+
+  // HUD
+  document.getElementById('hud-n').textContent = n;
+  document.getElementById('hud-score').textContent = 0;
+  document.getElementById('hud-total').textContent = 0;
+
+  // dots
+  buildDots();
+  document.getElementById('collecting-banner').style.display = 'none';
+
+  showScreen('screen-play');
+  showQuestion();
+}
+
+function buildDots() {
+  const row = document.getElementById('dots-row');
+  row.innerHTML = '';
+  // ドットは回答問題数(TOTAL_QUESTIONS)分のみ
+  for (let i = 0; i < CONFIG.TOTAL_QUESTIONS; i++) {
+    const d = document.createElement('div');
+    d.className = 'dot';
+    d.id = `dot-${i}`;
+    row.appendChild(d);
+  }
+}
+
+function updateDots() {
+  // answers[i] → dot[i] に直接対応
+  gameState.answers.forEach((ans, i) => {
+    const dot = document.getElementById(`dot-${i}`);
+    if (!dot) return;
+    dot.classList.remove('current', 'answered-correct', 'answered-wrong');
+    dot.classList.add(ans.correct ? 'answered-correct' : 'answered-wrong');
+  });
+  // 現在の回答待ちドット
+  const cur = document.getElementById(`dot-${gameState.answers.length}`);
+  if (cur) cur.classList.add('current');
+}
+
+/* ===========================
+   SHOW QUESTION
+=========================== */
+function showQuestion() {
+  const { questions, currentIndex, nBack } = gameState;
+  clearTimer();
+
+  const expr   = document.getElementById('q-expression');
+  const label  = document.getElementById('q-phase-label');
+  const idxEl  = document.getElementById('q-index');
+  const skipEl = document.getElementById('skip-area');
+  const adLabel= document.getElementById('ad-label');
+  const adHint = document.getElementById('ad-hint');
+  const adVal  = document.getElementById('ad-value');
+  const numpad = document.getElementById('numpad');
+
+  currentInput = '';
+  adVal.textContent = '__';
+  adVal.classList.remove('has-value');
+
+  // フェードアニメーション
+  expr.classList.add('fade');
+  setTimeout(() => {
+    const q = questions[currentIndex];
+    expr.textContent = `${q.a} ${q.op} ${q.b}`;
+    expr.classList.remove('fade', 'collecting-expr');
+
+    const isSkipPhase = currentIndex < nBack;
+    const answerNum = gameState.answers.length + 1;
+    idxEl.textContent = isSkipPhase
+      ? `暗記 ${currentIndex + 1} / ${nBack}`
+      : `回答 ${answerNum} / ${CONFIG.TOTAL_QUESTIONS}`;
+
+    if (isSkipPhase) {
+      label.textContent = '覚えておこう';
+      skipEl.style.display = 'block';
+      skipEl.innerHTML = `最初の${nBack}問は見るだけ`;
+      adLabel.textContent = '— 回答不要 —';
+      adHint.textContent = '';
+      setNumpadDisabled(true);
+    } else {
+      label.textContent = `${nBack}個前の答えは？`;
+      skipEl.style.display = 'none';
+      adLabel.textContent = '';
+      adHint.textContent = '';
+      setNumpadDisabled(false);
+    }
+
+    SE.next();
+    updateDots();
+    startTimer(isSkipPhase);
+  }, 150);
+}
+
+function setNumpadDisabled(disabled) {
+  document.querySelectorAll('.np-btn:not(.pass)').forEach(b => {
+    b.disabled = disabled;
+  });
+  // パスボタンは回答不要フェーズでも常に非活性
+  document.getElementById('btn-pass').disabled = disabled;
+}
+
+/* ===========================
+   TIMER
+=========================== */
+function startTimer(autoAdvance = false) {
+  const bar = document.getElementById('progress-bar');
+  const duration = autoAdvance ? CONFIG.TIME_MEMORIZE : CONFIG.TIME_PER_QUESTION;
+  timerRemaining = duration * 1000;
+  const total    = timerRemaining;
+  let warnedOnce = false;
+
+  bar.style.transition = 'none';
+  bar.style.width = '100%';
+  bar.classList.remove('warning');
+  void bar.offsetWidth;
+  bar.style.transition = `width ${duration}s linear`;
+  bar.style.width = '0%';
+
+  timerInterval = setInterval(() => {
+    timerRemaining -= 100;
+    if (timerRemaining <= total * 0.35) {
+      bar.classList.add('warning');
+      if (!autoAdvance && !warnedOnce) {
+        warnedOnce = true;
+        SE.warning();
+      }
+    }
+    if (timerRemaining <= 0) {
+      clearTimer();
+      if (autoAdvance) {
+        advancePlaying();
+      } else {
+        // 時間切れ → 不正解
+        registerAnswer(null);
+      }
+    }
+  }, 100);
+}
+
+function clearTimer() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+
+/* ===========================
+   INPUT HANDLING
+=========================== */
+function handleDigit(val) {
+  if (inputLocked) return;
+  if (currentInput.length >= 2) return;
+  SE.tap();
+  currentInput += val;
+  updateAnswerDisplay();
+}
+
+function handleDel() {
+  if (inputLocked) return;
+  SE.del();
+  currentInput = currentInput.slice(0, -1);
+  updateAnswerDisplay();
+}
+
+function handleEnter() {
+  if (inputLocked) return;
+  if (currentInput === '') return;
+  const num = parseInt(currentInput, 10);
+  if (isNaN(num)) return;
+  registerAnswer(num);
+}
+
+function updateAnswerDisplay() {
+  const adVal = document.getElementById('ad-value');
+  if (currentInput === '') {
+    adVal.textContent = '__';
+    adVal.classList.remove('has-value');
+  } else {
+    adVal.textContent = currentInput;
+    adVal.classList.add('has-value');
+  }
+}
+
+function registerAnswer(given) {
+  clearTimer();
+  inputLocked = true;
+
+  const { nBack, questions, currentIndex } = gameState;
+
+  const expectedIdx = currentIndex - nBack;
+  const expected = questions[expectedIdx].answer;
+  const correct  = (given !== null) && (given === expected);
+
+  gameState.answers.push({ expected, given, correct });
+  gameState.totalAnswered++;
+  if (correct) gameState.score++;
+
+  document.getElementById('hud-score').textContent = gameState.score;
+  document.getElementById('hud-total').textContent = gameState.totalAnswered;
+
+  if (given === null) SE.timeout();
+  else if (correct)   SE.correct();
+  else                SE.wrong();
+
+  showFeedback(correct, given, expected);
+
+  setTimeout(() => {
+    inputLocked = false;
+    currentInput = '';
+    updateAnswerDisplay();
+
+    advancePlaying();
+  }, CONFIG.FEEDBACK_DURATION);
+}
+
+function showFeedback(correct, given, expected) {
+  const overlay = document.getElementById('feedback-overlay');
+  const hint    = document.getElementById('q-correct-hint');
+  const qArea   = document.getElementById('question-area');
+
+  if (CONFIG.FEEDBACK) overlay.className = 'feedback-overlay show ' + (correct ? 'correct' : 'wrong');
+
+  if (correct) {
+    hint.classList.remove('show');
+    qArea.classList.remove('shake');
+    void qArea.offsetWidth;
+    if (CONFIG.FEEDBACK) qArea.classList.add('pulse-correct');
+  } else {
+    if (CONFIG.SHOW_ANSWER) {
+      hint.textContent = given === null ? `時間切れ — 正解: ${expected}` : `正解: ${expected}`;
+      hint.classList.add('show');
+    }
+    qArea.classList.remove('pulse-correct');
+    void qArea.offsetWidth;
+    qArea.classList.add('shake');
+  }
+
+  setTimeout(() => {
+    overlay.classList.remove('show');
+    hint.classList.remove('show');
+    qArea.classList.remove('shake', 'pulse-correct');
+  }, CONFIG.FEEDBACK_DURATION - 60);
+}
+
+/* ===========================
+   ADVANCE LOGIC
+=========================== */
+function advancePlaying() {
+  gameState.currentIndex++;
+  // 暗記N問 + 回答TOTAL問 = 合計で終了
+  if (gameState.currentIndex >= CONFIG.TOTAL_QUESTIONS + gameState.nBack) {
+    endGame();
+    return;
+  }
+  showQuestion();
+}
+
+/* ===========================
+   END GAME
+=========================== */
+function endGame() {
+  clearTimer();
+  gameState.phase = 'result';
+  showResultScreen();
+}
+
+function showResultScreen() {
+  const { score, totalAnswered, nBack } = gameState;
+  const pct = totalAnswered > 0 ? Math.round(score / totalAnswered * 100) : 0;
+
+  document.getElementById('result-level').textContent = `${nBack}バックレベル`;
+  document.getElementById('stat-correct').textContent = score;
+  document.getElementById('stat-total').textContent   = totalAnswered;
+  document.getElementById('ring-pct').textContent     = `${pct}%`;
+
+  // 自己ベスト
+  const { prev, isNew } = saveBest(nBack, pct);
+  const bestRow = document.getElementById('best-row');
+  const bestPct = isNew ? pct : (prev >= 0 ? prev : pct);
+  bestRow.innerHTML = `
+    <span class="best-label">自己ベスト（${nBack}バック）</span>
+    <span class="best-value ${isNew ? 'is-new' : 'not-new'}">
+      ${bestPct}%${isNew && prev >= 0 ? `<span class="best-new-badge">NEW</span>` : isNew ? '<span class="best-new-badge">初回</span>' : ''}
+    </span>
+  `;
+  renderStartBests();
+
+  // pct number coloring
+  const pctEl = document.getElementById('ring-pct');
+  pctEl.classList.remove('pct-up', 'pct-warn', 'pct-down');
+  const isUp = pct >= CONFIG.LEVEL_UP_THRESHOLD * 100;
+  if (isUp) pctEl.classList.add('pct-up');
+  else if (pct < CONFIG.LEVEL_DOWN_THRESHOLD * 100) pctEl.classList.add('pct-down');
+  else pctEl.classList.add('pct-warn');
+
+  // リングアニメーション (kept for JS, element is hidden)
+  const circumference = 339.29;
+  const fill = document.getElementById('ring-fill');
+  fill.style.strokeDashoffset = circumference;
+  SE.fanfare(isUp);
+  setTimeout(() => {
+    fill.style.strokeDashoffset = circumference * (1 - pct / 100);
+    if (isUp) fill.style.stroke = 'var(--success)';
+    else if (pct < CONFIG.LEVEL_DOWN_THRESHOLD * 100) fill.style.stroke = 'var(--danger)';
+    else fill.style.stroke = 'var(--warn)';
+  }, 100);
+
+  // レベル判定バナー
+  const banner = document.getElementById('level-banner');
+  const icon   = document.getElementById('banner-icon');
+  const title  = document.getElementById('banner-title');
+  const desc   = document.getElementById('banner-desc');
+
+  let suggestion;
+  if (pct >= CONFIG.LEVEL_UP_THRESHOLD * 100) {
+    banner.className = 'level-banner up';
+    icon.textContent  = '🔥';
+    title.textContent = 'レベルアップ！';
+    desc.textContent  = `正答率 ${pct}%！${nBack + 1}バックに挑戦しますか？`;
+    suggestion = 'up';
+  } else if (pct < CONFIG.LEVEL_DOWN_THRESHOLD * 100 && nBack > 1) {
+    banner.className = 'level-banner down';
+    icon.textContent  = '💪';
+    title.textContent = 'もう少し練習しよう';
+    desc.textContent  = `正答率 ${pct}%。${nBack - 1}バックで慣れてから再挑戦！`;
+    suggestion = 'down';
+  } else {
+    banner.className = 'level-banner same';
+    icon.textContent  = '⚡';
+    title.textContent = '同じレベルで再挑戦！';
+    desc.textContent  = `正答率 ${pct}%。もう一度 ${nBack}バックに挑戦してみよう。`;
+    suggestion = 'same';
+  }
+
+  // アクションボタン生成
+  const actions = document.getElementById('result-actions');
+  actions.innerHTML = '';
+
+  const makeBtn = (label, cls, onClick) => {
+    const btn = document.createElement('button');
+    btn.className = `btn-action ${cls}`;
+    btn.textContent = label;
+    btn.addEventListener('click', onClick);
+    actions.appendChild(btn);
+  };
+
+  if (suggestion === 'up') {
+    makeBtn(`${nBack + 1}バックに挑戦！`, 'primary', () => {
+      gameState.nBack = Math.min(nBack + 1, CONFIG.MAX_N_BACK);
+      startWithCountdown();
+    });
+  }
+  if (suggestion === 'down' && nBack > 1) {
+    makeBtn(`${nBack - 1}バックで挑戦`, 'primary', () => {
+      gameState.nBack = nBack - 1;
+      startWithCountdown();
+    });
+  }
+  makeBtn(`${nBack}バックでもう一度`, suggestion === 'same' ? 'primary' : 'secondary', () => {
+    startWithCountdown();
+  });
+  makeBtn('レベルを選びなおす', 'secondary', () => {
+    initStartScreen();
+    renderStartBests();
+    showScreen('screen-start');
+  });
+
+  showScreen('screen-result');
+}
+
+/* ===========================
+   KEYBOARD SUPPORT
+=========================== */
+document.addEventListener('keydown', (e) => {
+  const playing = gameState.phase === 'playing' || gameState.phase === 'collecting';
+  if (!playing) return;
+  if (e.key >= '0' && e.key <= '9') { handleDigit(e.key); return; }
+  if (e.key === 'Backspace' || e.key === 'Delete') { handleDel(); return; }
+  if (e.key === 'Enter') { handleEnter(); return; }
+});
+
+/* ===========================
+   NUMPAD EVENTS
+=========================== */
+document.querySelectorAll('.np-btn.digit').forEach(btn => {
+  btn.addEventListener('click', () => handleDigit(btn.dataset.val));
+});
+document.getElementById('btn-del').addEventListener('click', handleDel);
+document.getElementById('btn-enter').addEventListener('click', handleEnter);
+document.getElementById('btn-pass').addEventListener('click', () => {
+  if (inputLocked) return;
+  const isSkipPhase = gameState.phase === 'playing' && gameState.currentIndex < gameState.nBack;
+  if (isSkipPhase) return; // 回答不要フェーズはスキップ不可
+  registerAnswer(null);
+});
+
+/* ===========================
+   MUTE BUTTON
+=========================== */
+document.getElementById('btn-mute').addEventListener('click', () => {
+  const muted = SE.toggle();
+  const btn = document.getElementById('btn-mute');
+  btn.textContent = muted ? '🔇' : '🔊';
+  btn.classList.toggle('muted', muted);
+});
+
+/* ===========================
+   RANKING MODAL
+=========================== */
+const rankingModal = document.getElementById('ranking-modal');
+document.getElementById('btn-ranking-close').addEventListener('click', () => {
+  rankingModal.classList.remove('open');
+});
+rankingModal.addEventListener('click', (e) => {
+  if (e.target === rankingModal) rankingModal.classList.remove('open');
+});
+
+/* ===========================
+   SETTINGS MODAL
+=========================== */
+const settingsModal = document.getElementById('settings-modal');
+document.getElementById('btn-settings').addEventListener('click', () => {
+  renderSettingsUI(); settingsModal.classList.add('open');
+});
+document.getElementById('btn-settings-close').addEventListener('click', () => {
+  settingsModal.classList.remove('open');
+});
+settingsModal.addEventListener('click', e => {
+  if (e.target === settingsModal) settingsModal.classList.remove('open');
+});
+initSettingsEvents();
+
+/* ===========================
+   RULE MODAL
+=========================== */
+const ruleModal = document.getElementById('rule-modal');
+document.getElementById('btn-rule').addEventListener('click', () => {
+  updateRuleDesc();
+  ruleModal.classList.add('open');
+});
+document.getElementById('btn-rule-close').addEventListener('click', () => {
+  ruleModal.classList.remove('open');
+});
+ruleModal.addEventListener('click', (e) => {
+  if (e.target === ruleModal) ruleModal.classList.remove('open');
+});
+
+/* ===========================
+   START BUTTON
+=========================== */
+document.getElementById('btn-start').addEventListener('click', startWithCountdown);
+
+/* ===========================
+   BOOT
+=========================== */
+applySettings(loadSettings());
+initStartScreen();
+renderStartBests();
+</script>
+</body>
+</html>
